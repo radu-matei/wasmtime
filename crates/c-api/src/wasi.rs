@@ -1,7 +1,6 @@
 //! The WASI embedding API definitions for Wasmtime.
 use crate::{wasm_extern_t, wasm_importtype_t, wasm_store_t, wasm_trap_t};
 use anyhow::Result;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fs::File;
@@ -10,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::slice;
 use std::str;
+use std::{cell::RefCell, fs::OpenOptions};
 use wasmtime::{Extern, Linker, Trap};
 use wasmtime_wasi::{
     sync::{
@@ -23,10 +23,42 @@ unsafe fn cstr_to_path<'a>(path: *const c_char) -> Option<&'a Path> {
     CStr::from_ptr(path).to_str().map(Path::new).ok()
 }
 
+const FILE_SHARE_DELETE: u32 = 0x4;
+const FILE_SHARE_READ: u32 = 0x1;
+const FILE_SHARE_WRITE: u32 = 0x2;
+const FILE_ACCESS_GENERIC_ALL: u32 = 0x1;
+
+#[cfg(not(target_os = "windows"))]
 unsafe fn open_file(path: *const c_char) -> Option<File> {
     File::open(cstr_to_path(path)?).ok()
 }
 
+#[cfg(target_os = "windows")]
+unsafe fn open_file(path: *const c_char) -> Option<File> {
+    use std::os::windows::prelude::*;
+
+    OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .access_mode(FILE_ACCESS_GENERIC_ALL)
+        .open(cstr_to_path(path)?)
+        .ok()
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn create_file(path: *const c_char) -> Option<File> {
+    use std::os::windows::prelude::*;
+
+    OpenOptions::new()
+        .write(true)
+        .create(true)
+        .share_mode(FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .access_mode(FILE_ACCESS_GENERIC_ALL)
+        .open(cstr_to_path(path)?)
+        .ok()
+}
+
+#[cfg(not(target_os = "windows"))]
 unsafe fn create_file(path: *const c_char) -> Option<File> {
     File::create(cstr_to_path(path)?).ok()
 }
